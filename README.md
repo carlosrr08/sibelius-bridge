@@ -1,10 +1,14 @@
-# sibelius-bridge
+![sibelius-bridge: Claude edits layout and parts in Sibelius 2020 through a plugin and a file mailbox](docs/banner.png)
 
 Claude (or any MCP client) edits scores in **Sibelius 2020**, through a ManuScript plugin, a keyboard shortcut and a folder of text files. No subscription, no Sibelius Connect, no upgrade.
 
+[![Film: the plugin reflows a string quartet score while it plays, then the parts and the click track](docs/film-poster.jpg)](https://github.com/carlosrr08/sibelius-bridge/releases/download/v0.1.0/sibelius-bridge.mp4)
+
+The film above (73 s, with sound) is an animation: the Sibelius window is redrawn, and the commands and results in the terminal are the ones the tool prints. The recording below is unedited.
+
 ![Claude laying out a string quartet score and its parts in Sibelius 2020.6](docs/demo.gif)
 
-*Right: an unedited screen recording of Sibelius 2020.6. Left: the commands that ran during the recording, with their output. The [full video (mp4, 44 s)](docs/demo.mp4) also shows the click-track tool.*
+Right: a screen recording of Sibelius 2020.6. Left: the commands that ran during the recording, with their output. The [full recording (mp4, 44 s)](docs/demo.mp4) also shows the click-track tool.
 
 ## Why I built it
 
