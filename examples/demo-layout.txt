@@ -1,0 +1,12 @@
+setup|0|StaffSize=5.5
+break|0|4,8,12,20,24,28|system
+break|0|16|page
+optimize|0
+setup|1|PageSize=4
+setup|2|PageSize=4
+setup|3|PageSize=4
+setup|4|PageSize=4
+break|1|4,8,12,20,24,28|system
+break|2|4,8,12,20,24,28|system
+break|3|4,8,12,20,24,28|system
+break|4|8,24|system

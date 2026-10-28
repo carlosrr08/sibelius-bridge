@@ -1,0 +1,16 @@
+# runtime mailbox and caches
+io/
+__pycache__/
+.DS_Store
+
+# personal notes for Claude Code
+CLAUDE.local.md
+
+# scores and audio stay local (copyright); examples/ has its own generated demo
+test/
+versions/
+review/
+*.wav
+*.mid
+*.sib
+!examples/*.sib

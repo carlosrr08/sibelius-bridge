@@ -1,0 +1,68 @@
+#!/bin/bash
+# sib: run ClaudeBridge commands in the open Sibelius score. Commands: see CLAUDE.md.
+#   sib install                      build + install the plugin (then restart Sibelius)
+#   sib 'parts' 'map|3'              one or more commands, one plugin run
+#   sib - < cmds.txt                 commands from stdin
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+IO="$DIR/io"
+KEY="${SIB_KEY:-b}"                                         # the shortcut you gave Claude Bridge in Sibelius
+MODS="${SIB_MODS:-control down, option down, command down}" # default: ctrl+opt+cmd+B
+TIMEOUT="${SIB_TIMEOUT:-120}"                               # seconds; big PDF exports are slow
+PLUGDIR="$HOME/Library/Application Support/Avid/Sibelius/Plugins/Claude"
+
+if [[ "${1:-}" == install ]]; then
+  mkdir -p "$PLUGDIR" "$IO"
+  # Sibelius plugins are UTF-16LE with BOM
+  { printf '\xff\xfe'; sed "s|__IODIR__|$IO/|" "$DIR/ClaudeBridge.plg" | iconv -f UTF-8 -t UTF-16LE; } > "$PLUGDIR/ClaudeBridge.plg"
+  echo "installed: $PLUGDIR/ClaudeBridge.plg (restart Sibelius to load changes)"
+  exit 0
+fi
+
+if [[ "${1:-}" == reload ]]; then # save open score, install plugin, restart Sibelius on the same score
+  file=$("$0" save info | sed -n 's/^file|//p')
+  "$0" install
+  osascript -e 'tell application "Sibelius" to quit' >/dev/null 2>&1 || true
+  while pgrep -x Sibelius >/dev/null; do sleep 1; done
+  open -a Sibelius "$file"
+  until osascript -e 'tell application "System Events" to get name of every window of process "Sibelius"' 2>/dev/null | grep -q .; do sleep 1; done
+  sleep 3
+  exec "$0" info
+fi
+
+mkdir -p "$IO"
+rm -f "$IO/result.txt" "$IO/done.txt"
+if [[ "${1:-}" == - ]]; then cat; else printf '%s\n' "$@"; fi | iconv -f UTF-8 -t LATIN1 > "$IO/cmd.txt"
+
+prev=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true')
+press() { # bring Sibelius forward (may switch Spaces, which takes ~1s), then press the shortcut
+  osascript >/dev/null <<EOF
+tell application "Sibelius" to activate
+tell application "System Events"
+  repeat 50 times
+    if frontmost of process "Sibelius" and (count windows of process "Sibelius") > 0 then exit repeat
+    delay 0.1
+  end repeat
+  delay 0.8
+  keystroke "$KEY" using {$MODS}
+end tell
+EOF
+}
+# the plugin deletes cmd.txt as soon as it starts; retry the shortcut if it never did
+for try in 1 2 3; do
+  press
+  for ((i = 0; i < 25; i++)); do [[ -f "$IO/cmd.txt" ]] || break 2; sleep 0.2; done
+done
+[[ -f "$IO/cmd.txt" ]] && { echo "plugin did not start: shortcut not assigned or a dialog is open in Sibelius" >&2; exit 2; }
+
+for ((i = 0; i < TIMEOUT * 5; i++)); do
+  if [[ -f "$IO/done.txt" ]]; then
+    osascript -e "tell application \"$prev\" to activate" >/dev/null 2>&1 || true
+    iconv -f LATIN1 -t UTF-8 "$IO/result.txt"
+    ! grep -q '^error|' "$IO/result.txt"
+    exit
+  fi
+  sleep 0.2
+done
+echo "timeout after ${TIMEOUT}s: shortcut not assigned, a dialog is open in Sibelius, or the plugin hit an error" >&2
+exit 2

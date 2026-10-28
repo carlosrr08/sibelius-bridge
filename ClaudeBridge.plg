@@ -1,0 +1,374 @@
+{
+	Initialize "() {
+AddToPluginsMenu('Claude Bridge', 'Run');
+}"
+	Run "() {
+// Reads IODir/cmd.txt (one command per line, fields split by |), writes IODir/result.txt, then IODir/done.txt.
+ResultFile = IODir & 'result.txt';
+doneFile = IODir & 'done.txt';
+cmdFile = IODir & 'cmd.txt';
+Sibelius.CreateTextFile(ResultFile);
+if (Sibelius.ScoreCount = 0) {
+	Emit('error|no score open');
+} else {
+	if (Sibelius.FileExists(cmdFile)) {
+		lines = Sibelius.ReadTextFile(cmdFile);
+		Sibelius.GetFile(cmdFile).Delete();
+		score = Sibelius.ActiveScore;
+		orig = score.CurrentDynamicPart;
+		for each line in lines {
+			if (Length(line) > 0) {
+				Emit('> ' & line);
+				Dispatch(score, line);
+				score.CurrentDynamicPart = orig;
+			}
+		}
+	} else {
+		Emit('error|no cmd.txt in ' & IODir);
+	}
+}
+Sibelius.CreateTextFile(doneFile);
+}"
+	Dispatch "(score, line) {
+f = SplitString(line, '|', False);
+cmd = Arg(f, 0);
+if (cmd = 'info') {
+	s1 = score.NthStaff(1);
+	Emit('title|' & score.Title);
+	Emit('file|' & score.FileName);
+	Emit('bars|' & s1.BarCount);
+	Emit('staves|' & score.StaffCount);
+	Emit('parts|' & (score.DynamicParts.NumChildren - 1));
+	Emit('magnetic|' & score.MagneticLayoutEnabled);
+	return True;
+}
+if (cmd = 'parts') { return Parts(score); }
+if (cmd = 'scoreinfo') { return ScoreInfo(score, Arg(f, 1)); }
+if (cmd = 'save') {
+	if (Arg(f, 1) = '') { score.Save(score.FileName); } else { score.SaveCopyAs(Arg(f, 1)); }
+	Emit('ok');
+	return True;
+}
+part = GetPart(score, Arg(f, 1));
+if (part = null) { Emit('error|bad part index: ' & Arg(f, 1)); return False; }
+score.CurrentDynamicPart = part;
+if (cmd = 'map') { return Map(score, Arg(f, 2), Arg(f, 3)); }
+if (cmd = 'break') { return SetBreaks(score, Arg(f, 2), Arg(f, 3)); }
+if (cmd = 'setup') { return Setup(score, Arg(f, 2)); }
+if (cmd = 'rules') { return Rules(score, Arg(f, 2)); }
+if (cmd = 'texts') { return Texts(score, '', '', False); }
+if (cmd = 'replacetext') { return Texts(score, Arg(f, 2), Arg(f, 3), False); }
+if (cmd = 'deltext') { return Texts(score, Arg(f, 2), '', True); }
+if (cmd = 'settext') {
+	// system text by style name; empty text deletes those objects
+	objs = CreateSparseArray();
+	for each SystemTextItem t in score.SystemStaff { if (t.StyleAsText = Arg(f, 2)) { objs.Push(t); } }
+	for each t in objs { if (Arg(f, 3) = '') { t.Delete(); } else { t.Text = Arg(f, 3); } }
+	Emit('ok|' & objs.Length);
+	return True;
+}
+if (cmd = 'hideempty' or cmd = 'showempty') {
+	// staves '1-6,10' (numbers in the current part), bars from-to
+	staves = ParseBars(Arg(f, 2));
+	for each n in staves {
+		if (cmd = 'hideempty') { score.HideEmptyStaves(n, n, 0 + Arg(f, 3), 0 + Arg(f, 4)); }
+		else { score.ShowEmptyStaves(n, n, 0 + Arg(f, 3), 0 + Arg(f, 4)); }
+	}
+	Emit('ok|' & staves.Length);
+	return True;
+}
+if (cmd = 'staves') {
+	i = 1;
+	for each s in score { Emit(i & '|' & s.FullInstrumentName); i = i + 1; }
+	return True;
+}
+if (cmd = 'resetpos') {
+	// Layout > Reset Position on staff text and lines (dynamics, hairpins, technique) of the current part
+	objs = CreateSparseArray();
+	for each s in score {
+		for each Text t in s { objs.Push(t); }
+		for each Line l in s { objs.Push(l); }
+		for each CrescendoLine l in s { objs.Push(l); }
+		for each DiminuendoLine l in s { objs.Push(l); }
+	}
+	for each o in objs { o.ResetPosition(); }
+	Emit('ok|' & objs.Length);
+	return True;
+}
+if (cmd = 'dynabove') {
+	// vocal parts: dynamics (Expression text) and hairpins above the staff, clear of lyrics. Dy in 1/32 spaces from middle line
+	n = 0;
+	tdy = 0 + Arg(f, 2);
+	ldy = 0 + Arg(f, 3);
+	for each s in score {
+		for each Text t in s { if (t.StyleAsText = 'Expression') { t.Dy = tdy; n = n + 1; } }
+		for each CrescendoLine l in s { l.Dy = ldy; l.RhDy = ldy; n = n + 1; }
+		for each DiminuendoLine l in s { l.Dy = ldy; l.RhDy = ldy; n = n + 1; }
+	}
+	Emit('ok|' & n);
+	return True;
+}
+if (cmd = 'nudge') {
+	// nudge|P|bar|style|dx|dy: move staff text of that style in that bar, 1/32 spaces (dy up)
+	n = 0;
+	for each s in score {
+		for each Text t in s {
+			if (t.ParentBar.BarNumber = (0 + Arg(f, 2)) and t.StyleAsText = Arg(f, 3)) { t.Dx = t.Dx + Arg(f, 4); t.Dy = t.Dy + Arg(f, 5); n = n + 1; }
+		}
+	}
+	Emit('ok|' & n);
+	return True;
+}
+if (cmd = 'resetspace') {
+	for each s in score { s.ResetSpaceAroundStaff(True, True); }
+	Emit('ok');
+	return True;
+}
+if (cmd = 'optimize') { return Optimize(score, Arg(f, 2), Arg(f, 3)); }
+if (cmd = 'multirests') { score.ShowMultiRests = (0 + Arg(f, 2)); Emit('ok'); return True; }
+if (cmd = 'split') {
+	bars = ParseBars(Arg(f, 2));
+	s1 = score.NthStaff(1);
+	for each n in bars { s1.NthBar(n).SplitMultirest = (0 + Arg(f, 3)); }
+	Emit('ok|' & bars.Length);
+	return True;
+}
+if (cmd = 'show') { Sibelius.ShowDynamicPart(part); Emit('ok'); return True; }
+if (cmd = 'pdf') {
+	path = Arg(f, 2);
+	if (part.IsFullScore) {
+		score.ExportScoreAsPDF(path);
+	} else {
+		score.ExportPartsAsPDF(path, True, CreateSparseArray(part));
+	}
+	Emit('ok|' & path);
+	return True;
+}
+Emit('error|unknown command: ' & cmd);
+return False;
+}"
+	Arg "(f, i) {
+if (i < f.NumChildren) { return f[i]; }
+return '';
+}"
+	Emit "(line) {
+Sibelius.AppendLineToFile(ResultFile, line, False);
+}"
+	GetPart "(score, idx) {
+if (idx = '') { return null; }
+return score.DynamicParts[0 + idx];
+}"
+	ParseBars "(spec) {
+// '4,8,12' or '1-40' or '1-8,12'
+r = CreateSparseArray();
+chunks = SplitString(spec, ',', True);
+for each chunk in chunks {
+	ab = SplitString(chunk, '-', True);
+	a = 0 + Arg(ab, 0);
+	b = a;
+	if (ab.NumChildren > 1) { b = 0 + Arg(ab, 1); }
+	for k = a to b + 1 { r.Push(k); }
+}
+return r;
+}"
+	BreakNames "() {
+return CreateSparseArray('', 'MiddleOfSystem', 'EndOfSystem', 'MiddleOfPage', 'EndOfPage', 'NotEndOfSystem', 'system', 'none', 'SpecialPageBreak');
+}"
+	BreakCode "(name) {
+// accepts 1-8, UI names (system, page, none) or ManuScript constant names
+if (name = 'page') { return 4; }
+if (name = 'EndOfSystemOrPage') { return 6; }
+if (name = 'Default') { return 7; }
+n = 0 + name;
+if (n > 0) { return n; }
+names = BreakNames();
+for i = 1 to 9 { if (names[i] = name) { return i; } }
+return 0;
+}"
+	BreakName "(code) {
+if (code = 4) { return 'page'; }
+names = BreakNames();
+return names[code];
+}"
+	Parts "(score) {
+Emit('idx|name|staves|pages|staffsize|page|multirests');
+i = 0;
+for each p in score.DynamicParts {
+	score.CurrentDynamicPart = p;
+	ds = score.DocumentSetup;
+	name = score.PartName;
+	if (p.IsFullScore) { name = 'Full Score'; }
+	if (name = '') { name = score.NthStaff(1).FullInstrumentName; }
+	Emit(i & '|' & name & '|' & p.StaveCount & '|' & score.PageCount & '|' & ds.StaffSize & '|' & ds.PageWidth & 'x' & ds.PageHeight & '|' & score.ShowMultiRests);
+	i = i + 1;
+}
+return True;
+}"
+	Map "(score, fromBar, toBar) {
+// one row per bar of the current part: where it sits, its break, multirest state, notes played in it (all staves)
+s1 = score.NthStaff(1);
+a = 1;
+b = s1.BarCount;
+if (fromBar != '') { a = 0 + fromBar; }
+if (toBar != '') { b = 0 + toBar; }
+notes = CreateSparseArray();
+marks = CreateSparseArray();
+for i = 0 to s1.BarCount + 1 { notes[i] = 0; marks[i] = ''; }
+for each s in score {
+	for each NoteRest nr in s {
+		if (nr.NoteCount > 0) { k = nr.ParentBar.BarNumber; notes[k] = notes[k] + 1; }
+	}
+}
+for each RehearsalMark rm in score.SystemStaff { marks[rm.ParentBar.BarNumber] = rm.MarkAsText; }
+Emit('bar|ext|page|system|pos|break|multirest|notes|mark');
+for i = a to b + 1 {
+	bar = s1.NthBar(i);
+	pg = bar.OnNthPage + 1;
+	sy = bar.OnNthSystem + 1;
+	Emit(i & '|' & bar.ExternalBarNumberString & '|' & pg & '|' & sy & '|' & bar.NthBarInSystem & '|' & BreakName(bar.BreakType) & '|' & bar.InMultirest & '|' & notes[i] & '|' & marks[i]);
+}
+return True;
+}"
+	SetBreaks "(score, spec, kind) {
+t = BreakCode(kind);
+if (t = 0) { Emit('error|unknown break type: ' & kind); return False; }
+bars = ParseBars(spec);
+for each n in bars { score.SetBreakType(n, t); }
+Emit('ok|' & bars.Length);
+return True;
+}"
+	Optimize "(score, fromBar, toBar) {
+c = 0;
+for each s in score { c = c + 1; }
+a = 1;
+b = score.NthStaff(1).BarCount;
+if (fromBar != '') { a = 0 + fromBar; }
+if (toBar != '') { b = 0 + toBar; }
+score.OptimizeStaffSpacing(1, c, a, b);
+Emit('ok');
+return True;
+}"
+	Setup "(score, assigns) {
+// Layout > Document Setup, millimetres. assigns: 'StaffSize=7,PageTopMargin=12' (empty = just read)
+ds = score.DocumentSetup;
+if (assigns != '') {
+	pairs = SplitString(assigns, ',', True);
+	for each kv in pairs {
+		p = SplitString(kv, '=', True);
+		k = Arg(p, 0);
+		v = 0 + Arg(p, 1);
+		hit = False;
+		if (k = 'PageSize') { ds.PageSize = v; hit = True; }
+		if (k = 'Orientation') { ds.Orientation = v; hit = True; }
+		if (k = 'PageWidth') { ds.PageWidth = v; hit = True; }
+		if (k = 'PageHeight') { ds.PageHeight = v; hit = True; }
+		if (k = 'StaffSize') { ds.StaffSize = v; hit = True; }
+		if (k = 'MarginType') { ds.MarginType = v; hit = True; }
+		if (k = 'PageTopMargin') { ds.PageTopMargin = v; hit = True; }
+		if (k = 'PageBottomMargin') { ds.PageBottomMargin = v; hit = True; }
+		if (k = 'PageLeftMargin') { ds.PageLeftMargin = v; hit = True; }
+		if (k = 'PageRightMargin') { ds.PageRightMargin = v; hit = True; }
+		if (k = 'AboveTopStaveGap') { ds.AboveTopStaveGap = v; hit = True; }
+		if (k = 'BelowBottomStaveGap') { ds.BelowBottomStaveGap = v; hit = True; }
+		if (not hit) { Emit('error|unknown setup key: ' & k); }
+	}
+}
+Emit('PageSize|' & ds.PageSize);
+Emit('Orientation|' & ds.Orientation);
+Emit('PageWidth|' & ds.PageWidth);
+Emit('PageHeight|' & ds.PageHeight);
+Emit('StaffSize|' & ds.StaffSize);
+Emit('MarginType|' & ds.MarginType);
+Emit('PageTopMargin|' & ds.PageTopMargin);
+Emit('PageBottomMargin|' & ds.PageBottomMargin);
+Emit('PageLeftMargin|' & ds.PageLeftMargin);
+Emit('PageRightMargin|' & ds.PageRightMargin);
+Emit('AboveTopStaveGap|' & ds.AboveTopStaveGap);
+Emit('BelowBottomStaveGap|' & ds.BelowBottomStaveGap);
+Emit('pages|' & score.PageCount);
+return True;
+}"
+	Rules "(score, assigns) {
+// House Style > Engraving Rules (staff/system spacing), in spaces. Empty assigns = just read.
+er = score.EngravingRules;
+if (assigns != '') {
+	pairs = SplitString(assigns, ',', True);
+	for each kv in pairs {
+		p = SplitString(kv, '=', True);
+		k = Arg(p, 0);
+		v = 0 + Arg(p, 1);
+		hit = False;
+		if (k = 'SpacesBetweenStaves') { er.SpacesBetweenStaves = v; hit = True; }
+		if (k = 'SpacesBetweenSystems') { er.SpacesBetweenSystems = v; hit = True; }
+		if (k = 'StaffJustificationPercentage') { er.StaffJustificationPercentage = v; hit = True; }
+		if (k = 'ExtraSpaceBetweenGroupsOfStaves') { er.ExtraSpaceBetweenGroupsOfStaves = v; hit = True; }
+		if (k = 'ExtraSpacesBelowVocalStaves') { er.ExtraSpacesBelowVocalStaves = v; hit = True; }
+		if (not hit) { Emit('error|unknown rules key: ' & k); }
+	}
+}
+Emit('SpacesBetweenStaves|' & er.SpacesBetweenStaves);
+Emit('SpacesBetweenSystems|' & er.SpacesBetweenSystems);
+Emit('StaffJustificationPercentage|' & er.StaffJustificationPercentage);
+Emit('ExtraSpaceBetweenGroupsOfStaves|' & er.ExtraSpaceBetweenGroupsOfStaves);
+Emit('ExtraSpacesBelowVocalStaves|' & er.ExtraSpacesBelowVocalStaves);
+Emit('pages|' & score.PageCount);
+return True;
+}"
+	ScoreInfo "(score, assigns) {
+// File > Score Info text fields. assigns: 'Subtitle=,Copyright=(c) 2026 Your Name' (empty = just read)
+if (assigns != '') {
+	pairs = SplitString(assigns, ',', True);
+	for each kv in pairs {
+		p = SplitString(kv, '=', False);
+		k = Arg(p, 0);
+		v = Arg(p, 1);
+		hit = False;
+		if (k = 'Title') { score.Title = v; hit = True; }
+		if (k = 'Subtitle') { score.Subtitle = v; hit = True; }
+		if (k = 'Composer') { score.Composer = v; hit = True; }
+		if (k = 'Arranger') { score.Arranger = v; hit = True; }
+		if (k = 'Copyright') { score.Copyright = v; hit = True; }
+		if (not hit) { Emit('error|unknown scoreinfo key: ' & k); }
+	}
+}
+Emit('Title|' & score.Title);
+Emit('Subtitle|' & score.Subtitle);
+Emit('Composer|' & score.Composer);
+Emit('Arranger|' & score.Arranger);
+Emit('Copyright|' & score.Copyright);
+return True;
+}"
+	Texts "(score, find, repl, del) {
+// system + staff text of the current part. find empty: list; del: delete texts equal to find; else replace substring
+objs = CreateSparseArray();
+for each SystemTextItem t in score.SystemStaff { objs.Push(t); }
+for each s in score { for each Text t in s { objs.Push(t); } }
+if (find = '') { for each s in score { for each CrescendoLine l in s { Emit('line|' & l.ParentBar.BarNumber & '|' & l.StyleAsText & '|' & l.Dy); } for each DiminuendoLine l in s { Emit('line|' & l.ParentBar.BarNumber & '|' & l.StyleAsText & '|' & l.Dy); } } }
+n = 0;
+for each t in objs {
+	if (find = '') {
+		Emit('text|' & t.ParentBar.BarNumber & '|' & t.StyleAsText & '|' & t.Text);
+	} else {
+		if (del) {
+			if (t.Text = find) { t.Delete(); n = n + 1; }
+		} else {
+			s2 = StrReplace(t.Text, find, repl);
+			if (s2 != t.Text) { t.Text = s2; n = n + 1; }
+		}
+	}
+}
+if (find != '') { Emit('ok|' & n); }
+return True;
+}"
+	StrReplace "(s, find, repl) {
+r = '';
+k = Length(find);
+i = 0;
+while (i < Length(s)) {
+	if (Substring(s, i, k) = find) { r = r & repl; i = i + k; } else { r = r & CharAt(s, i); i = i + 1; }
+}
+return r;
+}"
+	IODir "__IODIR__"
+	ResultFile ""
+}
