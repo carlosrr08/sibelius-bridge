@@ -4,7 +4,6 @@ Claude (or any MCP client) edits scores in **Sibelius 2020**, through a ManuScri
 
 [![Film: the plugin reflows a string quartet score while it plays, then the parts and the click track](docs/film-poster.jpg)](https://github.com/carlosrr08/sibelius-bridge/releases/download/v0.1.0/sibelius-bridge.mp4)
 
-The film above (73 s, with sound) is an animation: the Sibelius window is redrawn, and the commands and results in the terminal are the ones the tool prints. The recording below is unedited.
 
 ![Claude laying out a string quartet score and its parts in Sibelius 2020.6](docs/demo.gif)
 
